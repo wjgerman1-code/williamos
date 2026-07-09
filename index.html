@@ -880,6 +880,16 @@ textarea::placeholder, input::placeholder { color: var(--text3); }
   margin-bottom: 8px;
 }
 
+/* ═══ EDIT HINT ═══ */
+.edit-hint {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
 /* ═══ EMPTY STATE ═══ */
 .empty-state {
   text-align: center;
@@ -1694,9 +1704,78 @@ function renderTasks() {
     el.onclick = (e) => { e.stopPropagation(); openSalesNoFlow(el.dataset.no); };
   });
 
+  // Tap a task to edit / delete it
+  document.querySelectorAll('.list-item[data-tid]').forEach(el => {
+    el.onclick = () => openEditTask(el.dataset.tid);
+  });
+
   // Add task button
   const addBtn = document.getElementById('btn-add-task');
   if (addBtn) addBtn.onclick = () => openAddTask();
+}
+
+function openEditTask(id) {
+  const tasks = DB.get('tasks', []);
+  const t = tasks.find(x => x.id === id);
+  if (!t) return;
+
+  const bodyHtml = `
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Task Name</div>
+      <input type="text" id="edit-task-title" value="${escAttr(t.title)}">
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Detail (product · premium)</div>
+      <input type="text" id="edit-task-sub" value="${escAttr(t.sub || '')}" placeholder="e.g. Term Life · $1,240/yr">
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Type</div>
+      <div class="chips" style="flex-wrap:wrap;margin-bottom:0;">
+        ${TASK_FILTERS.filter(f => f.key !== 'blocked').map(f =>
+          `<button class="chip ${t.type===f.key?'active':''}" data-et="${f.key}">${f.label}</button>`
+        ).join('')}
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-label">Notes</div>
+      <textarea id="edit-task-note" rows="3" placeholder="Details…">${esc(t.note || '')}</textarea>
+    </div>`;
+
+  const footerHtml = `
+    <button class="btn btn-primary" id="btn-update-task">Save Changes</button>
+    <button class="btn btn-danger" id="btn-delete-task">Delete Task</button>
+    <button class="btn btn-ghost" id="btn-cancel-etask">Cancel</button>`;
+
+  openOverlay('Edit Task', bodyHtml, footerHtml);
+
+  let type = t.type;
+  document.querySelectorAll('.chip[data-et]').forEach(el => {
+    el.onclick = () => {
+      document.querySelectorAll('.chip[data-et]').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      type = el.dataset.et;
+    };
+  });
+
+  document.getElementById('btn-update-task').onclick = () => {
+    const title = document.getElementById('edit-task-title').value.trim();
+    if (!title) return;
+    const idx = tasks.findIndex(x => x.id === id);
+    tasks[idx].title = title;
+    tasks[idx].sub = document.getElementById('edit-task-sub').value.trim();
+    tasks[idx].note = document.getElementById('edit-task-note').value.trim();
+    tasks[idx].type = type;
+    DB.set('tasks', tasks);
+    closeOverlay();
+  };
+
+  document.getElementById('btn-delete-task').onclick = () => {
+    if (!confirm('Delete this task? This cannot be undone.')) return;
+    DB.set('tasks', tasks.filter(x => x.id !== id));
+    closeOverlay();
+  };
+
+  document.getElementById('btn-cancel-etask').onclick = closeOverlay;
 }
 
 function openAddTask() {
@@ -1757,13 +1836,15 @@ function renderGoals() {
 
   if (featured) {
     const p = pct(featured.current, featured.target);
-    html += `<div class="goal-featured">
-      <div class="label" style="margin-bottom:6px;">Mission · ${esc(featured.name)}</div>
+    html += `<div class="goal-featured" data-gid="${escAttr(featured.id)}" style="cursor:pointer;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div class="label">Mission · ${esc(featured.name)}</div>
+        <span class="edit-hint">Edit ›</span>
+      </div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${esc(featured.desc)}</div>
       <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">
         <span class="goal-big-num">${esc(String(featured.current))}</span>
         <span class="goal-big-denom">/ ${esc(String(featured.target))} ${esc(featured.unit)}</span>
-        <span class="goal-new-label">+1 today</span>
       </div>
       <div class="progress-track" style="height:12px;margin-bottom:6px;">
         <div class="progress-fill" style="width:${p}%"></div>
@@ -1785,7 +1866,7 @@ function renderGoals() {
     const display = g.unit === 'lbs'
       ? `${g.current} → ${g.target} lbs`
       : `${g.current} / ${g.target}`;
-    html += `<div class="goal-card" data-gid="${escAttr(g.id)}">
+    html += `<div class="goal-card" data-gid="${escAttr(g.id)}" style="cursor:pointer;">
       <div class="goal-card-label">${esc(g.label)}</div>
       <div class="goal-card-title">${esc(g.name)}</div>
       <div class="goal-card-pct">${esc(display)}</div>
@@ -1798,6 +1879,77 @@ function renderGoals() {
   document.getElementById('screen-goals').innerHTML = html;
 
   document.getElementById('btn-add-goal').onclick = () => openAddGoal();
+
+  document.querySelectorAll('[data-gid]').forEach(el => {
+    el.onclick = () => openEditGoal(el.dataset.gid);
+  });
+}
+
+function openEditGoal(id) {
+  const goals = DB.get('goals', []);
+  const g = goals.find(x => x.id === id);
+  if (!g) return;
+
+  const cats = ['Faith','Family','Health','Business','Growth','Discipline'];
+  const bodyHtml = `
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Goal Name</div>
+      <input type="text" id="edit-goal-name" value="${escAttr(g.name)}">
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Description</div>
+      <input type="text" id="edit-goal-desc" value="${escAttr(g.desc || '')}" placeholder="Short description">
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Category</div>
+      <div class="chips" style="flex-wrap:wrap;margin-bottom:0;">
+        ${cats.map(c => `<button class="chip ${g.label===c?'active':''}" data-egc="${c}">${c}</button>`).join('')}
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:8px;">
+      <div class="field" style="flex:1;"><div class="field-label">Current</div><input type="number" inputmode="decimal" id="edit-goal-cur" value="${escAttr(String(g.current))}"></div>
+      <div class="field" style="flex:1;"><div class="field-label">Target</div><input type="number" inputmode="decimal" id="edit-goal-tgt" value="${escAttr(String(g.target))}"></div>
+      <div class="field" style="flex:1;"><div class="field-label">Unit</div><input type="text" id="edit-goal-unit" value="${escAttr(g.unit || '')}"></div>
+    </div>`;
+
+  const footerHtml = `
+    <button class="btn btn-primary" id="btn-update-goal">Save Changes</button>
+    <button class="btn btn-danger" id="btn-delete-goal">Delete Goal</button>
+    <button class="btn btn-ghost" id="btn-cancel-egoal">Cancel</button>`;
+
+  openOverlay('Edit Goal', bodyHtml, footerHtml);
+
+  let cat = g.label;
+  document.querySelectorAll('.chip[data-egc]').forEach(el => {
+    el.onclick = () => {
+      document.querySelectorAll('.chip[data-egc]').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      cat = el.dataset.egc;
+    };
+  });
+
+  document.getElementById('btn-update-goal').onclick = () => {
+    const name = document.getElementById('edit-goal-name').value.trim();
+    if (!name) return;
+    const idx = goals.findIndex(x => x.id === id);
+    goals[idx].name = name;
+    goals[idx].desc = document.getElementById('edit-goal-desc').value.trim();
+    goals[idx].label = cat;
+    goals[idx].category = cat.toLowerCase();
+    goals[idx].current = parseFloat(document.getElementById('edit-goal-cur').value) || 0;
+    goals[idx].target = parseFloat(document.getElementById('edit-goal-tgt').value) || goals[idx].target;
+    goals[idx].unit = document.getElementById('edit-goal-unit').value.trim();
+    DB.set('goals', goals);
+    closeOverlay();
+  };
+
+  document.getElementById('btn-delete-goal').onclick = () => {
+    if (!confirm('Delete this goal? This cannot be undone.')) return;
+    DB.set('goals', goals.filter(x => x.id !== id));
+    closeOverlay();
+  };
+
+  document.getElementById('btn-cancel-egoal').onclick = closeOverlay;
 }
 
 function openAddGoal() {
@@ -1921,12 +2073,73 @@ function openNoteDetail(id) {
 
   const footerHtml = `
     <button class="btn btn-secondary" id="btn-teaching-app">✦ &nbsp; Apply This Teaching</button>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-edit-note">Edit</button>
+      <button class="btn btn-danger" id="btn-delete-note">Delete</button>
+    </div>
     <button class="btn btn-ghost" id="btn-note-close">Close</button>`;
 
   openOverlay('Note', bodyHtml, footerHtml);
 
   document.getElementById('btn-teaching-app').onclick = () => { closeOverlay(); openTeachingApp(id); };
+  document.getElementById('btn-edit-note').onclick = () => openEditNote(id);
+  document.getElementById('btn-delete-note').onclick = () => {
+    if (!confirm('Delete this note? This cannot be undone.')) return;
+    DB.set('notes', notes.filter(x => x.id !== id));
+    closeOverlay();
+  };
   document.getElementById('btn-note-close').onclick = closeOverlay;
+}
+
+function openEditNote(id) {
+  const notes = DB.get('notes', []);
+  const n = notes.find(x => x.id === id);
+  if (!n) return;
+
+  const bodyHtml = `
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Title / Hook</div>
+      <input type="text" id="edit-note-title" value="${escAttr(n.title)}">
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <div class="field-label">Category</div>
+      <div class="chips" style="flex-wrap:wrap;margin-bottom:0;">
+        ${NOTE_FILTERS.filter(f=>f.key!=='all').map(f =>
+          `<button class="chip ${n.category===f.key?'active':''}" data-enc="${f.key}">${f.label}</button>`
+        ).join('')}
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-label">Content</div>
+      <textarea id="edit-note-body" rows="6">${esc(n.preview || '')}</textarea>
+    </div>`;
+
+  const footerHtml = `
+    <button class="btn btn-primary" id="btn-update-note">Save Changes</button>
+    <button class="btn btn-ghost" id="btn-cancel-enote">Cancel</button>`;
+
+  openOverlay('Edit Note', bodyHtml, footerHtml);
+
+  let cat = n.category;
+  document.querySelectorAll('.chip[data-enc]').forEach(el => {
+    el.onclick = () => {
+      document.querySelectorAll('.chip[data-enc]').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      cat = el.dataset.enc;
+    };
+  });
+
+  document.getElementById('btn-update-note').onclick = () => {
+    const title = document.getElementById('edit-note-title').value.trim();
+    if (!title) return;
+    const idx = notes.findIndex(x => x.id === id);
+    notes[idx].title = title;
+    notes[idx].preview = document.getElementById('edit-note-body').value.trim();
+    notes[idx].category = cat;
+    DB.set('notes', notes);
+    closeOverlay();
+  };
+  document.getElementById('btn-cancel-enote').onclick = closeOverlay;
 }
 
 function openAddNote() {
@@ -2177,34 +2390,49 @@ function openSettings() {
         <div class="settings-row-right">ON</div>
       </div>
       <div class="settings-row">
-        <div><div class="settings-row-label">Demo Data Mode</div><div class="settings-row-sub">Pre-populated example data</div></div>
+        <div><div class="settings-row-label">Demo Data Mode</div><div class="settings-row-sub">Example tasks, goals &amp; notes are loaded. Tap any item to edit it.</div></div>
         <div class="settings-row-right">ACTIVE</div>
       </div>
+    </div>
+    <div class="sep"></div>
+    <div>
+      <div class="label" style="margin-bottom:12px;">Your Data</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;">
+        Everything is yours to change. Tap any task, goal, or note to edit or delete it — or wipe the demo content below and build your own from scratch.
+      </div>
+      <button class="btn btn-danger" style="margin-bottom:10px;" id="btn-clear-demo">Clear Demo Data &amp; Start Fresh</button>
+      <button class="btn btn-ghost" id="btn-reset-day">Reset Today's Setup</button>
     </div>
     <div class="sep"></div>
     <div>
       <div class="label" style="margin-bottom:12px;">System</div>
       <div class="settings-row">
         <div><div class="settings-row-label">Version</div></div>
-        <div class="settings-row-right mono" style="font-size:12px;">2.0.0</div>
+        <div class="settings-row-right mono" style="font-size:12px;">2.0.1</div>
       </div>
-      <div class="settings-row">
-        <div><div class="settings-row-label">Check for Updates</div></div>
-        <div class="settings-row-right">›</div>
-      </div>
-    </div>
-    <div class="sep"></div>
-    <button class="btn btn-danger" style="margin-top:4px;" id="btn-reset-day">Reset Today's Setup</button>`;
+    </div>`;
 
   openOverlay('Settings', bodyHtml, '<button class="btn btn-ghost" id="btn-close-settings">Done</button>');
 
   document.getElementById('btn-close-settings').onclick = closeOverlay;
+
   document.getElementById('btn-reset-day').onclick = () => {
     if (confirm('Reset today\'s morning setup?')) {
       DB.set('setup_' + DB.today(), null);
       DB.set('exec_done_' + DB.today(), false);
       closeOverlay();
+      switchTab('home');
     }
+  };
+
+  document.getElementById('btn-clear-demo').onclick = () => {
+    if (!confirm('This clears ALL demo tasks, goals, and notes so you can start with a blank slate. This cannot be undone. Continue?')) return;
+    DB.set('tasks', []);
+    DB.set('goals', []);
+    DB.set('notes', []);
+    DB.set('seeded', true); // prevent demo data from re-seeding
+    closeOverlay();
+    switchTab('home');
   };
 }
 
