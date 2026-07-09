@@ -1,2 +1,3 @@
-# williamos
-WilliamOS Personal Operating System
+# WilliamOS
+
+Personal Operating System for William Joel German / Grace & Guard.
